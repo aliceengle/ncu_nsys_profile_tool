@@ -1,4 +1,0 @@
-[2025-10-22 19:41:10] CMD: ncu --import /nfs/3D/zhangleichao/zhangleichao/edge10_ws/ncu_dir/scripts/bash_metric/./out/yolo_infer/ncu/yolo_infer.ncu-rep --page raw --csv
-==ERROR== Could not open report file '/nfs/3D/zhangleichao/zhangleichao/edge10_ws/ncu_dir/scripts/bash_metric/./out/yolo_infer/ncu/yolo_infer.ncu-rep'.
-==ERROR== The file does not exist or is not a regular file.
-[2025-10-22 19:41:11] RC: 1

@@ -1,61 +1,0 @@
-[*] yolo_infer :: nsys profile
-[2025-10-22 19:39:37] CMD: env nsys profile --trace=cuda,nvtx --force-overwrite=true --cuda-event-trace=false -o /nfs/3D/zhangleichao/zhangleichao/edge10_ws/ncu_dir/scripts/bash_metric/./out/yolo_infer/nsys/yolo_infer -- /bin/bash -lc pixi run yolo-infer -- --nvtx
-yolo-infer: command not found
-
-Available tasks:
-	sgemm-bench
-	sgemm-build
-	sgemm-ncu
-	sgemm-run
-Collecting data...
-Generating '/tmp/nsys-report-cf4f.qdstrm'
-[1/1] [0%                          ] yolo_infer.nsys-rep[1/1] [0%                          ] yolo_infer.nsys-rep[1/1] [6%                          ] yolo_infer.nsys-rep[1/1] [10%                         ] yolo_infer.nsys-rep[1/1] [==========48%               ] yolo_infer.nsys-rep[1/1] [============54%             ] yolo_infer.nsys-rep[1/1] [=============60%            ] yolo_infer.nsys-rep[1/1] [==============61%           ] yolo_infer.nsys-rep[1/1] [==============62%           ] yolo_infer.nsys-rep[1/1] [==============63%           ] yolo_infer.nsys-rep[1/1] [==============64%           ] yolo_infer.nsys-rep[1/1] [===============65%          ] yolo_infer.nsys-rep[1/1] [===============66%          ] yolo_infer.nsys-rep[1/1] [===============67%          ] yolo_infer.nsys-rep[1/1] [================68%         ] yolo_infer.nsys-rep[1/1] [================69%         ] yolo_infer.nsys-rep[1/1] [================70%         ] yolo_infer.nsys-rep[1/1] [================71%         ] yolo_infer.nsys-rep[1/1] [=================72%        ] yolo_infer.nsys-rep[1/1] [=================73%        ] yolo_infer.nsys-rep[1/1] [=================74%        ] yolo_infer.nsys-rep[1/1] [==================75%       ] yolo_infer.nsys-rep[1/1] [==================76%       ] yolo_infer.nsys-rep[1/1] [==================77%       ] yolo_infer.nsys-rep[1/1] [==================78%       ] yolo_infer.nsys-rep[1/1] [===================79%      ] yolo_infer.nsys-rep[1/1] [===================80%      ] yolo_infer.nsys-rep[1/1] [===================81%      ] yolo_infer.nsys-rep[1/1] [===================82%      ] yolo_infer.nsys-rep[1/1] [====================83%     ] yolo_infer.nsys-rep[1/1] [====================84%     ] yolo_infer.nsys-rep[1/1] [====================85%     ] yolo_infer.nsys-rep[1/1] [=====================86%    ] yolo_infer.nsys-rep[1/1] [=====================87%    ] yolo_infer.nsys-rep[1/1] [=====================88%    ] yolo_infer.nsys-rep[1/1] [=====================89%    ] yolo_infer.nsys-rep[1/1] [======================90%   ] yolo_infer.nsys-rep[1/1] [======================91%   ] yolo_infer.nsys-rep[1/1] [======================92%   ] yolo_infer.nsys-rep[1/1] [=======================93%  ] yolo_infer.nsys-rep[1/1] [=======================94%  ] yolo_infer.nsys-rep[1/1] [=======================95%  ] yolo_infer.nsys-rep[1/1] [=======================96%  ] yolo_infer.nsys-rep[1/1] [========================97% ] yolo_infer.nsys-rep[1/1] [========================98% ] yolo_infer.nsys-rep[1/1] [========================99% ] yolo_infer.nsys-rep[1/1] [========================100%] yolo_infer.nsys-rep[1/1] [========================100%] yolo_infer.nsys-rep[1/1] [========================100%] yolo_infer.nsys-rep
-Generated:
-	/nfs/3D/zhangleichao/zhangleichao/edge10_ws/ncu_dir/scripts/bash_metric/./out/yolo_infer/nsys/yolo_infer.nsys-rep
-[2025-10-22 19:39:50] RC: 127
-[ERROR] nsys profile failed for yolo_infer
-[*] yolo_infer :: nsys stats -> CSV
-[2025-10-22 19:39:50] CMD: nsys stats --force-export=true --force-overwrite=true --sqlite /nfs/3D/zhangleichao/zhangleichao/edge10_ws/ncu_dir/scripts/bash_metric/./out/yolo_infer/nsys/yolo_infer.sqlite --report cuda_gpu_kern_sum,cuda_gpu_mem_size_sum,cuda_api_sum --format csv --output /nfs/3D/zhangleichao/zhangleichao/edge10_ws/ncu_dir/scripts/bash_metric/./out/yolo_infer/nsys/yolo_infer /nfs/3D/zhangleichao/zhangleichao/edge10_ws/ncu_dir/scripts/bash_metric/./out/yolo_infer/nsys/yolo_infer.nsys-rep
-Generating SQLite file /nfs/3D/zhangleichao/zhangleichao/edge10_ws/ncu_dir/scripts/bash_metric/./out/yolo_infer/nsys/yolo_infer.sqlite from /nfs/3D/zhangleichao/zhangleichao/edge10_ws/ncu_dir/scripts/bash_metric/./out/yolo_infer/nsys/yolo_infer.nsys-rep
-Processing [/nfs/3D/zhangleichao/zhangleichao/edge10_ws/ncu_dir/scripts/bash_metric/./out/yolo_infer/nsys/yolo_infer.sqlite] with [/opt/nvidia/nsight-systems/2025.1.3/host-linux-x64/reports/cuda_gpu_kern_sum.py] to [/nfs/3D/zhangleichao/zhangleichao/edge10_ws/ncu_dir/scripts/bash_metric/./out/yolo_infer/nsys/yolo_infer_cuda_gpu_kern_sum.csv]... PROCESSED (EMPTY RESULTS)
-
-SKIPPED: /nfs/3D/zhangleichao/zhangleichao/edge10_ws/ncu_dir/scripts/bash_metric/./out/yolo_infer/nsys/yolo_infer.sqlite does not contain CUDA kernel data.
-
-Processing [/nfs/3D/zhangleichao/zhangleichao/edge10_ws/ncu_dir/scripts/bash_metric/./out/yolo_infer/nsys/yolo_infer.sqlite] with [/opt/nvidia/nsight-systems/2025.1.3/host-linux-x64/reports/cuda_gpu_mem_size_sum.py] to [/nfs/3D/zhangleichao/zhangleichao/edge10_ws/ncu_dir/scripts/bash_metric/./out/yolo_infer/nsys/yolo_infer_cuda_gpu_mem_size_sum.csv]... PROCESSED (EMPTY RESULTS)
-
-SKIPPED: /nfs/3D/zhangleichao/zhangleichao/edge10_ws/ncu_dir/scripts/bash_metric/./out/yolo_infer/nsys/yolo_infer.sqlite does not contain GPU memory data.
-
-Processing [/nfs/3D/zhangleichao/zhangleichao/edge10_ws/ncu_dir/scripts/bash_metric/./out/yolo_infer/nsys/yolo_infer.sqlite] with [/opt/nvidia/nsight-systems/2025.1.3/host-linux-x64/reports/cuda_api_sum.py] to [/nfs/3D/zhangleichao/zhangleichao/edge10_ws/ncu_dir/scripts/bash_metric/./out/yolo_infer/nsys/yolo_infer_cuda_api_sum.csv]... PROCESSED (EMPTY RESULTS)
-
-SKIPPED: /nfs/3D/zhangleichao/zhangleichao/edge10_ws/ncu_dir/scripts/bash_metric/./out/yolo_infer/nsys/yolo_infer.sqlite does not contain CUDA trace data.
-
-[2025-10-22 19:39:50] RC: 0
-[*] yolo_infer :: pick Top-5 kernels from /nfs/3D/zhangleichao/zhangleichao/edge10_ws/ncu_dir/scripts/bash_metric/./out/yolo_infer/nsys/yolo_infer_cuda_gpu_kern_sum.csv
-[*] yolo_infer :: nsys profile
-[2025-10-22 19:41:05] CMD: env nsys profile --trace=cuda,nvtx --force-overwrite=true --cuda-event-trace=false --sample=none -o /nfs/3D/zhangleichao/zhangleichao/edge10_ws/ncu_dir/scripts/bash_metric/./out/yolo_infer/nsys/yolo_infer -- /bin/bash -lc pixi run yolo-infer -- --nvtx
-Throw location unknown (consider using BOOST_THROW_EXCEPTION)
-Dynamic exception type: boost::wrapexcept<boost::system::system_error>
-std::exception::what: open: Operation not permitted [system:1]
-
-[2025-10-22 19:41:05] RC: 1
-[WARN] nsys profile failed for yolo_infer; will skip nsys stats and regex generation.
-[SKIP] nsys stats disabled (NSYS_ENABLE=0)
-[INFO] NSYS disabled; skipping Top-N regex generation.
-[*] yolo_infer :: nsys profile
-[2025-10-22 19:42:34] CMD: env nsys profile --trace=cuda,nvtx --force-overwrite=true --cuda-event-trace=false --sample=none -o /nfs/3D/zhangleichao/zhangleichao/edge10_ws/ncu_dir/scripts/bash_metric/./out/yolo_infer/nsys/yolo_infer -- /bin/bash -lc pixi run yolo-infer -- --nvtx
-yolo-infer: command not found
-
-Available tasks:
-	sgemm-bench
-	sgemm-build
-	sgemm-ncu
-	sgemm-run
-Collecting data...
-Generating '/tmp/nsys-report-9ed1.qdstrm'
-[1/1] [0%                          ] yolo_infer.nsys-rep[1/1] [0%                          ] yolo_infer.nsys-rep[1/1] [=======38%                  ] yolo_infer.nsys-rep[1/1] [========42%                 ] yolo_infer.nsys-rep[1/1] [=========46%                ] yolo_infer.nsys-rep[1/1] [===========53%              ] yolo_infer.nsys-rep[1/1] [=============60%            ] yolo_infer.nsys-rep[1/1] [===============67%          ] yolo_infer.nsys-rep[1/1] [==================75%       ] yolo_infer.nsys-rep[1/1] [===================82%      ] yolo_infer.nsys-rep[1/1] [=====================89%    ] yolo_infer.nsys-rep[1/1] [=======================96%  ] yolo_infer.nsys-rep[1/1] [========================97% ] yolo_infer.nsys-rep[1/1] [========================100%] yolo_infer.nsys-rep[1/1] [========================100%] yolo_infer.nsys-rep
-Generated:
-	/nfs/3D/zhangleichao/zhangleichao/edge10_ws/ncu_dir/scripts/bash_metric/./out/yolo_infer/nsys/yolo_infer.nsys-rep
-[2025-10-22 19:42:42] RC: 127
-[WARN] nsys profile failed for yolo_infer; will skip nsys stats and regex generation.
-[SKIP] nsys stats disabled (NSYS_ENABLE=0)
-[INFO] NSYS disabled; skipping Top-N regex generation.
