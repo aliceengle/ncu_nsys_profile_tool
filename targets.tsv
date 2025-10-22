@@ -1,0 +1,2 @@
+id	cmd	workdir	env
+yolo_infer	python scripts/yolo_infer.py --nvtx	..	-
