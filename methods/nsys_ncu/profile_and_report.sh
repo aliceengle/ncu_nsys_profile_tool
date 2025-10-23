@@ -34,12 +34,7 @@ have_cmd "${PY}" || die "python3 not found"
 GEN_TOPK_PY="${SCRIPT_DIR}/gen_topk_regex.py"
 [[ -f "${GEN_TOPK_PY}" ]] || die "Missing helper Python script: ${GEN_TOPK_PY}"
 
-mkdir -p "${OUT_DIR}"
-GLOBAL_LOG="${GLOBAL_LOG:-${OUT_DIR}/profile_and_report.log}"
-: > "${GLOBAL_LOG}"
-echo "[START $(ts)] profile_and_report.sh run" | tee -a "${GLOBAL_LOG}"
-print_run_config "${GLOBAL_LOG}"
-
+# ---- helpers (define before use) ----
 run_and_log() {
   local _log="$1"; shift
   { echo "[$(ts)] CMD: $*"; "$@" 2>&1; local rc=$?; echo "[$(ts)] RC: $rc"; return $rc; } | tee -a "${_log}"
@@ -56,9 +51,7 @@ check_csv_basic() {
   if [[ "${header}" == *"CMD:"* || "${header}" == *"RC:"* || "${header}" == *"STEP"* ]]; then echo "[CHECK] ${_tag}: 首行疑似被日志污染 -> ${_f}" | tee -a "${_log}"; return 1; fi
   echo "[CHECK] ${_tag}: CSV 头部看起来正常 -> ${_f}" | tee -a "${_log}"
 }
-
 print_run_config() {
-  # $1 = logfile
   local _log="$1"
   echo "----- Run Config -----" | tee -a "${_log}"
   echo "CWD                : $(pwd)" | tee -a "${_log}"
@@ -78,17 +71,21 @@ print_run_config() {
   echo "NCU_MULTI_RUN      : ${NCU_MULTI_RUN}" | tee -a "${_log}"
   echo "CONTINUE_ON_ERROR  : ${CONTINUE_ON_ERROR}" | tee -a "${_log}"
   echo "Helper(gen_topk)   : ${GEN_TOPK_PY}" | tee -a "${_log}"
-  # Count targets
-  local _tcount
-  _tcount=$(awk -F '\t' 'NF>=2 { if ($1 ~ /^#/){next}; l=tolower($1); if (l=="id" || l=="name"){next}; c++ } END{print c+0}' "${TARGETS_TSV}" 2>/dev/null || echo 0)
+  local _tcount; _tcount=$(awk -F '\t' 'NF>=2 { if ($1 ~ /^#/){next}; l=tolower($1); if (l=="id" || l=="name"){next}; c++ } END{print c+0}' "${TARGETS_TSV}" 2>/dev/null || echo 0)
   echo "Targets to process : ${_tcount}" | tee -a "${_log}"
   echo "---------------------" | tee -a "${_log}"
 }
-
 init_stages() { STAGE_NAMES=("准备目录与上下文" "nsys 采集" "nsys 导出 CSV" "生成 TopN kernel 正则" "ncu 采集" "ncu 导出 raw CSV"); STAGE_TOTAL=${#STAGE_NAMES[@]}; STAGE_IDX=0; }
 stage_start() { local _log="$1"; local _name="$2"; STAGE_IDX=$((STAGE_IDX+1)); echo "[TARGET ${CURRENT_TARGET}] [STEP ${STAGE_IDX}/${STAGE_TOTAL}] 开始：${_name}" | tee -a "${_log}"; }
 stage_done()  { local _log="$1"; local _name="$2"; local _remain=$((STAGE_TOTAL - STAGE_IDX)); echo "[TARGET ${CURRENT_TARGET}] [STEP ${STAGE_IDX}/${STAGE_TOTAL}] 完成：${_name}；剩余 ${_remain} 步" | tee -a "${_log}"; if (( _remain>0 )); then local _next_name="${STAGE_NAMES[${STAGE_IDX}]}"; local _next_idx=$((STAGE_IDX+1)); echo "[TARGET ${CURRENT_TARGET}] [NEXT ${_next_idx}/${STAGE_TOTAL}] 即将执行：${_next_name}" | tee -a "${_log}"; fi; }
 stage_fail()  { local _log="$1"; local _name="$2"; local _remain=$((STAGE_TOTAL - STAGE_IDX)); echo "[TARGET ${CURRENT_TARGET}] [STEP ${STAGE_IDX}/${STAGE_TOTAL}] 失败：${_name}；剩余 ${_remain} 步（CONTINUE_ON_ERROR=${CONTINUE_ON_ERROR}）" | tee -a "${_log}"; }
+
+mkdir -p "${OUT_DIR}"
+GLOBAL_LOG="${GLOBAL_LOG:-${OUT_DIR}/profile_and_report.log}"
+: > "${GLOBAL_LOG}"
+echo "[START $(ts)] profile_and_report.sh run" | tee -a "${GLOBAL_LOG}"
+print_run_config "${GLOBAL_LOG}"
+
 
 while IFS=$'\t' read -r NAME CMD WORKDIR ENVS; do
   [[ -z "${NAME:-}" ]] && continue
