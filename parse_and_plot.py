@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-import sys, pathlib, re, numpy as np, pandas as pd, matplotlib.pyplot as plt
-from utils import read_csv_safe, pick_value
+import sys, pathlib, re, logging, numpy as np, pandas as pd, matplotlib.pyplot as plt
+from utils import read_csv_safe, pick_value, to_metric_unit_value, extract_rule_value
 
 # === Heuristic thresholds ===
 HEURISTIC = dict(
@@ -59,67 +59,188 @@ def parse_nsys_kern_sum(path):
     return out
 
 def parse_ncu_csv_pair(raw_csv, id_csv):
-    df_id = read_csv_safe(id_csv)
-    if not df_id.empty:
-        cols = [c.strip().lower() for c in df_id.columns]
-        df_id.columns = ['metric','unit','value'] + list(range(len(cols)-3))
-    df_raw = read_csv_safe(raw_csv)
-    if not df_raw.empty:
-        cols = [c.strip().lower() for c in df_raw.columns]
-        df_raw.columns = ['metric','unit','value'] + list(range(len(cols)-3))
+    df_id = to_metric_unit_value(read_csv_safe(id_csv))
+    df_raw = to_metric_unit_value(read_csv_safe(raw_csv))
     vals={}
+    # Human-readable label fallbacks for newer Nsight versions
+    LABEL_FALLBACKS = {
+        "sm_pct_peak": [
+            "SM % of Peak Sustained Elapsed",  # older
+            "Compute (SM) Throughput",         # newer human-readable
+        ],
+        "dram_pct_peak": [
+            "DRAM % of Peak Sustained Elapsed",  # older
+            "DRAM Throughput",                    # newer human-readable
+        ],
+        "tensor_active_pct": [
+            "Tensor Pipe Active",
+            "Tensor Core Active",
+        ],
+        "fp32_eff_pct": [
+            "FP32 (SP) FLOP Efficiency",
+            "FLOP_SP_EFFICIENCY",
+        ],
+        "l1_hit_pct": [
+            "L1/TEX Hit Rate",
+            "L1 Hit Rate",
+        ],
+        "l2_hit_pct": [
+            "L2 Hit Rate",
+        ],
+        "stall_barrier": [
+            "Warp Issue Stalled Barrier / Warp Active",
+        ],
+        "stall_short_sb": [
+            "Warp Issue Stalled Short Scoreboard / Warp Active",
+        ],
+        "stall_long_sb": [
+            "Warp Issue Stalled Long Scoreboard / Warp Active",
+        ],
+    }
+    def find_by_labels(df, labels):
+        if df is None or df.empty or not labels:
+            return None
+        for lb in labels:
+            sub = df[df['metric'].astype(str).str.contains(lb, regex=False)]
+            if not sub.empty:
+                v = pd.to_numeric(str(sub.iloc[0]['value']).replace('%',''), errors='coerce')
+                return v
+        return None
     for k, cands in METRICS_CAND.items():
         v,u,m = pick_value(df_id, cands)
         if not (isinstance(v,float) and np.isnan(v)):
             vals[k]=v
             continue
-        # Try Raw labels fallback
-        labels = {
-            "sm_pct_peak": ["SM % of Peak Sustained Elapsed"],
-            "dram_pct_peak": ["DRAM % of Peak Sustained Elapsed"],
-            "tensor_active_pct": ["Tensor Pipe Active"],
-            "fp32_eff_pct": ["FP32 (SP) FLOP Efficiency","FLOP_SP_EFFICIENCY"],
-            "l1_hit_pct": ["L1/TEX Hit Rate","L1 Hit Rate"],
-            "l2_hit_pct": ["L2 Hit Rate"],
-            "stall_barrier": ["Warp Issue Stalled Barrier / Warp Active"],
-            "stall_short_sb": ["Warp Issue Stalled Short Scoreboard / Warp Active"],
-            "stall_long_sb": ["Warp Issue Stalled Long Scoreboard / Warp Active"],
-        }.get(k, [])
-        if not df_raw.empty and labels:
-            for lb in labels:
-                sub = df_raw[df_raw['metric'].astype(str).str.contains(lb, regex=False)]
-                if not sub.empty:
-                    v = pd.to_numeric(str(sub.iloc[0]['value']).replace('%',''), errors='coerce')
-                    vals[k]=v; break
+        # Try label fallbacks: prefer id_csv (metrics-id), then raw
+        labels = LABEL_FALLBACKS.get(k, [])
+        v2 = find_by_labels(df_id, labels)
+        if v2 is None:
+            v2 = find_by_labels(df_raw, labels)
+        if v2 is not None:
+            vals[k] = v2
+            continue
+        # As last resort, try extracting rule-based values from metrics-id (e.g., CPIStall % under WarpStateStats)
+        if k == 'stall_barrier':
+            v3 = extract_rule_value(df_id, 'BarrierStall')
+            if not (isinstance(v3, float) and np.isnan(v3)):
+                vals[k] = v3; continue
+        if k == 'stall_short_sb':
+            v3 = extract_rule_value(df_id, 'ShortScoreboardStall')
+            if not (isinstance(v3, float) and np.isnan(v3)):
+                vals[k] = v3; continue
+        if k == 'stall_long_sb':
+            v3 = extract_rule_value(df_id, 'LongScoreboardStall')
+            if not (isinstance(v3, float) and np.isnan(v3)):
+                vals[k] = v3; continue
         if k not in vals:
             vals[k]=np.nan
     vals["bottleneck"] = classify_bottleneck(vals["sm_pct_peak"], vals["dram_pct_peak"], vals["l1_hit_pct"], vals["l2_hit_pct"])
     return vals
 
-def main(out_root):
+def _setup_id_logger(id_dir: pathlib.Path, base_log: pathlib.Path|None = None):
+    """Create a per-id logger that writes to out/<id>/log/parse_and_plot.log.
+    If base_log is provided, also attach a file handler appending to that path,
+    and a stream handler to mirror logs to stdout.
+    """
+    log_dir = id_dir / "log"
+    log_dir.mkdir(parents=True, exist_ok=True)
+    log_path = log_dir / "parse_and_plot.log"
+    logger = logging.getLogger(f"parse_and_plot.{id_dir.name}")
+    logger.setLevel(logging.INFO)
+    # Avoid duplicating handlers on repeated runs in the same interpreter
+    logger.handlers = []
+    fmt = logging.Formatter('%(asctime)s %(levelname)s %(name)s - %(message)s')
+    # default per-id file
+    fh_id = logging.FileHandler(str(log_path), mode='w', encoding='utf-8')
+    fh_id.setFormatter(fmt)
+    logger.addHandler(fh_id)
+    # optional base log appender (append mode)
+    if base_log is not None:
+        fh_base = logging.FileHandler(str(base_log), mode='a', encoding='utf-8')
+        fh_base.setFormatter(fmt)
+        logger.addHandler(fh_base)
+    # also mirror to stdout
+    sh = logging.StreamHandler(stream=sys.stdout)
+    sh.setFormatter(fmt)
+    logger.addHandler(sh)
+    logger.propagate = False
+    return logger
+
+def main(out_root, base_log: str|None = None):
     out_root = pathlib.Path(out_root)
     rows=[]
     for id_dir in sorted(out_root.glob("*")):
         if not (id_dir.is_dir() and (id_dir/"nsys").exists() and (id_dir/"ncu").exists()):
             continue
+        logger = _setup_id_logger(id_dir, pathlib.Path(base_log) if base_log else None)
+        logger.info("Begin summarize for id=%s", id_dir.name)
         nsys_csv = next((id_dir/"nsys").glob("*_cuda_gpu_kern_sum.csv"), None)
+        if nsys_csv:
+            logger.info("Found nsys kernel summary: %s", nsys_csv)
+        else:
+            logger.warning("nsys kernel summary CSV not found under %s", id_dir/"nsys")
         kern_df = parse_nsys_kern_sum(nsys_csv) if nsys_csv else pd.DataFrame()
-        for ncu_raw in sorted((id_dir/"ncu").glob("*_ncu_raw.csv")):
-            id_csv = pathlib.Path(str(ncu_raw).replace("_ncu_raw.csv","_metrics_id.csv"))
-            kname = ncu_raw.name.replace("_ncu_raw.csv","").replace("____"," ")
+        # Build a mapping from sanitized kernel name (as used in NCU filenames) to timing fields
+        def _sanitize_base(s: str) -> str:
+            return re.sub(r'[^A-Za-z0-9._-]+', '_', str(s))[:120]
+        ktime_map = {}
+        if not kern_df.empty:
+            for _, row in kern_df.iterrows():
+                k = str(row.get('kernel',''))
+                if not k:
+                    continue
+                ktime_map[_sanitize_base(k)] = (
+                    k,
+                    float(row.get('kernel_time_pct')) if 'kernel_time_pct' in kern_df.columns else float('nan'),
+                    float(row.get('kernel_total_time_ns')) if 'kernel_total_time_ns' in kern_df.columns else float('nan'),
+                )
+        # 兼容两种导出命名：*_ncu_raw.csv（Python 路线）与 *_raw.csv（Bash 方法脚本）
+        raw_list = list((id_dir/"ncu").glob("*_ncu_raw.csv")) + list((id_dir/"ncu").glob("*_raw.csv"))
+        seen = set()
+        logger.info("Found %d ncu raw CSV files", len(raw_list))
+        for ncu_raw in sorted(raw_list):
+            if ncu_raw in seen:
+                continue
+            seen.add(ncu_raw)
+            name = ncu_raw.name
+            if name.endswith("_ncu_raw.csv"):
+                id_csv = ncu_raw.with_name(name.replace("_ncu_raw.csv", "_metrics_id.csv"))
+            elif name.endswith("_raw.csv"):
+                id_csv = ncu_raw.with_name(name.replace("_raw.csv", "_metrics_id.csv"))
+            else:
+                id_csv = ncu_raw.with_suffix(".metrics_id.csv")
+            file_base = name.replace("_ncu_raw.csv","").replace("_raw.csv","")
+            # Skip top-level id capture like '<id>_raw.csv' which is not a specific kernel
+            if file_base == id_dir.name:
+                logger.info("Skip non-kernel raw CSV: %s", ncu_raw)
+                continue
+            # Determine display kernel name via mapping; fallback to file_base heuristic
+            mapped = ktime_map.get(file_base)
+            if mapped:
+                disp_kernel, kernel_time_pct, kernel_total_time_ns = mapped
+            else:
+                disp_kernel = file_base.replace("____"," ")
+                kernel_time_pct = float('nan')
+                kernel_total_time_ns = float('nan')
+            logger.info("Process ncu raw CSV: %s (derived id CSV: %s, kernel name: %s)", ncu_raw, id_csv, disp_kernel)
             vals = parse_ncu_csv_pair(ncu_raw, id_csv)
-            kernel_time_pct = kernel_total_ns = np.nan
-            if not kern_df.empty:
-                hit = kern_df[kern_df['kernel'].astype(str).str.contains(re.escape(kname), regex=True)]
-                if hit.empty:
-                    hit = kern_df[kern_df['kernel'].astype(str).str.contains(re.escape(kname).split('(')[0])]
-                if not hit.empty:
-                    kernel_time_pct = float(hit.iloc[0]['kernel_time_pct']) if 'kernel_time_pct' in hit else np.nan
-                    kernel_total_time_ns = float(hit.iloc[0]['kernel_total_time_ns']) if 'kernel_total_time_ns' in hit else np.nan
+            logger.info("Parsed metrics: sm%%=%.2f dram%%=%.2f l1%%=%.2f l2%%=%.2f time%%=%.2f total_ns=%s",
+                        vals.get('sm_pct_peak', float('nan')) if vals else float('nan'),
+                        vals.get('dram_pct_peak', float('nan')) if vals else float('nan'),
+                        vals.get('l1_hit_pct', float('nan')) if vals else float('nan'),
+                        vals.get('l2_hit_pct', float('nan')) if vals else float('nan'),
+                        kernel_time_pct if isinstance(kernel_time_pct, (int,float)) else float('nan'),
+                        str(kernel_total_time_ns))
+            # Drop rows with all-Nan core metrics AND no time info to reduce noise
+            core_vals = [vals.get('sm_pct_peak'), vals.get('dram_pct_peak'), vals.get('l1_hit_pct'), vals.get('l2_hit_pct')]
+            if all((v is None) or (isinstance(v,float) and np.isnan(v)) for v in core_vals) and (np.isnan(kernel_time_pct) and np.isnan(kernel_total_time_ns)):
+                logger.info("Skip empty metrics row for kernel=%s", disp_kernel)
+                continue
             rows.append(dict(
-                id=id_dir.name, kernel=kname, **vals,
+                id=id_dir.name, kernel=disp_kernel, **vals,
                 kernel_time_pct=kernel_time_pct, kernel_total_time_ns=kernel_total_time_ns
             ))
+        logger.info("Finish summarize for id=%s; appended %d kernel rows", id_dir.name, len([r for r in rows if r['id']==id_dir.name]))
     if not rows:
         print("No rows to summarize."); return
     df = pd.DataFrame(rows)
@@ -146,15 +267,19 @@ def main(out_root):
     long_df = pd.DataFrame(long_rows)
 
     ts = pd.Timestamp.now().strftime("%Y%m%d_%H%M%S")
-    csv_path = out_root / f"summary_{ts}.csv"
-    md_path  = out_root / f"summary_{ts}.md"
+    chart_dir = out_root / "figs"
+    chart_dir.mkdir(exist_ok=True, parents=True)
+    csv_path = chart_dir / f"summary_{ts}.csv"
+    md_path  = chart_dir / f"summary_{ts}.md"
     long_df.to_csv(csv_path, index=False)
 
     with open(md_path, "w", encoding="utf-8") as f:
         f.write("# 汇总表（关键指标）\n\n")
         for (idv, kernel), g in long_df.groupby(["id","kernel"]):
             f.write(f"## {idv} :: {kernel}\n\n")
-            sub = g[g["类别"].isin(["Kernel 耗时","整体推理瓶颈","算力单元利用率","内存带宽","Cache 命中率"])][["类别","分析详情","具体指标","值","单位","命令或计数器"]]
+            # 展示所有类别，保持与 CSV 一致；并进行稳定排序以便对齐
+            sub = g[["类别","分析详情","具体指标","值","单位","命令或计数器"]]
+            sub = sub.sort_values(["类别","分析详情","具体指标"], kind="stable")
             f.write(sub.fillna("nan").to_markdown(index=False))
             f.write("\n\n")
 
@@ -183,9 +308,24 @@ def main(out_root):
             plt.savefig(figs_dir / f"{idv}_sm_dram_peak.png")
             plt.close()
 
+    # 写入日志到每个 id 的日志目录
+    for idv, g in df.groupby("id"):
+        logger = _setup_id_logger(out_root / idv)
+        logger.info("Wrote summary CSV: %s", csv_path)
+        logger.info("Wrote summary MD : %s", md_path)
+        logger.info("Figures dir      : %s", figs_dir)
     print(f"Wrote: {csv_path}")
     print(f"Wrote: {md_path}")
     print(f"Figures: {figs_dir}")
 if __name__=="__main__":
-    out_root = sys.argv[1] if len(sys.argv)>1 else "./out"
-    main(out_root)
+    # CLI: parse_and_plot.py <out_root> [--log <path>]
+    out_root = None
+    base_log = None
+    args = sys.argv[1:]
+    if not args:
+        out_root = "./out"
+    else:
+        out_root = args[0]
+        if len(args) > 2 and args[1] == "--log":
+            base_log = args[2]
+    main(out_root, base_log)
