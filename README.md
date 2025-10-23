@@ -16,6 +16,9 @@
   - nsys stats 导出（生成 `*_cuda_gpu_kern_sum.csv` 等）；
   - 自动选取 Top-N kernel 并生成正则；
   - ncu 采集（生成 `.ncu-rep` 与 raw CSV）。
+- `methods/nsys_ncu/`：方法目录（精简版 Bash + Python 助手）
+  - `methods/nsys_ncu/profile_and_report.sh`：仅聚焦调用 nsys/ncu；复杂逻辑（TopN 正则、CSV 安检、进度打印）均保留；默认读取 `../targets.tsv`，输出到 `../out`。
+  - `methods/nsys_ncu/gen_topk_regex.py`：从 nsys 的 `cuda_gpu_kern_sum.csv` 选 Top-N kernel 并生成安全正则。
 - `run_profiling.py`：等价的 Python 实现，便于跨平台与小改造。
 - `parse_and_plot.py`：将 ncu 与 nsys 的 CSV 聚合成汇总表并绘图。
 - `targets.tsv`：任务定义表（TSV），一行一个目标。
@@ -45,7 +48,11 @@ resnet_train	python train.py --epochs 1	./cv	CUDA_VISIBLE_DEVICES=0
 
 ## 运行
 **Linux/macOS（bash）**
-在 `scripts/bash_metric` 目录下执行：
+在 `scripts/bash_metric` 目录下执行方法脚本：
+```bash
+bash methods/nsys_ncu/profile_and_report.sh
+```
+或使用顶层包装器（内部调用方法脚本）：
 ```bash
 bash profile_and_report.sh
 ```
@@ -80,6 +87,10 @@ python run_profiling.py
 - 查看运行过程：
   - `tail -f out/profile_and_report.log`
   - 或 `less +F out/profile_and_report.log`
+
+附加开关（方法脚本）：
+- `NCU_MULTI_RUN`：1（默认）逐核运行，多份 `.ncu-rep` 与 `*_raw.csv`；0 单次运行合并正则，生成一份 `.ncu-rep` 与 `*_raw.csv`。
+- `BASH_BIN`：指定 Bash 解析器（默认 `/bin/bash`），用于应用命令的 `-lc` 执行。
 
 ## 重要开关（健壮性与可重复）
 - **NVTX 非强依赖**：默认 `CAPTURE_RANGE=none`。若你给应用插了 NVTX，可设：
