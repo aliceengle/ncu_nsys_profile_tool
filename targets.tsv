@@ -1,2 +1,3 @@
-id	cmd	workdir	env
-yolo_infer	python scripts/yolo_infer.py --nvtx	..	-
+# NAME	CMD	WORKDIR	ENVS
+# 示例：以 TAB 分隔；可留空 WORKDIR/ENVS（用空字段或 '-'）
+yolo_infer	python ../yolo_infer.py --nvtx	.	-
