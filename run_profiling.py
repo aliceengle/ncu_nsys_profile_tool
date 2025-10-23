@@ -12,15 +12,29 @@ DEF_TOPN = int(os.environ.get("TOPN", "5"))
 NCU_METRICS = os.environ.get(
     "NCU_METRICS",
     ",".join([
+        # Throughput % of peak (SM/DRAM)
         "sm__throughput.avg.pct_of_peak_sustained_elapsed",
         "gpu__dram_throughput.avg.pct_of_peak_sustained_elapsed",
+        # Tensor/FP32 utilisation (newer Nsight identifiers)
+        "sm__inst_executed_pipe_tensor_op_hmma.avg.pct_of_peak_sustained_active",
+        "smsp__inst_executed_pipe_tensor_op_hmma.avg.pct_of_peak_sustained_active",
+        "sm__inst_executed_pipe_fp32.avg.pct_of_peak_sustained_active",
+        "smsp__inst_executed_pipe_fp32.avg.pct_of_peak_sustained_active",
+        # Legacy fallbacks
         "sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_active",
         "flop_sp_efficiency",
+        # Cache hit rates (L1/L2)
         "l1tex__t_sector_hit_rate.pct",
+        "l1tex__avg_hit_rate.pct",
         "lts__t_sector_hit_rate.pct",
+        "lts__avg_hit_rate.pct",
+        # Warp stalls
         "smsp__warp_issue_stalled_barrier_per_warp_active.avg",
         "smsp__warp_issue_stalled_short_scoreboard_per_warp_active.avg",
         "smsp__warp_issue_stalled_long_scoreboard_per_warp_active.avg",
+        "smsp__average_warps_issue_stalled_barrier_per_issue_active.ratio",
+        "smsp__average_warps_issue_stalled_short_scoreboard_per_issue_active.ratio",
+        "smsp__average_warps_issue_stalled_long_scoreboard_per_issue_active.ratio",
     ])
 )
 

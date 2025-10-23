@@ -12,15 +12,52 @@ HEURISTIC = dict(
 )
 
 METRICS_CAND = {
-  "sm_pct_peak": [r"sm__throughput\.avg\.pct_of_peak_sustained_elapsed"],
-  "dram_pct_peak": [r"gpu__dram_throughput\.avg\.pct_of_peak_sustained_elapsed"],
-  "tensor_active_pct": [r"sm__pipe_tensor_cycles_active\.avg\.pct_of_peak_sustained_active"],
-  "fp32_eff_pct": [r"flop_sp_efficiency"],
-  "l1_hit_pct": [r"l1tex__t_sector_hit_rate\.pct"],
-  "l2_hit_pct": [r"lts__t_sector_hit_rate\.pct"],
-  "stall_barrier": [r"smsp__warp_issue_stalled_barrier_per_warp_active\.avg"],
-  "stall_short_sb": [r"smsp__warp_issue_stalled_short_scoreboard_per_warp_active\.avg"],
-  "stall_long_sb": [r"smsp__warp_issue_stalled_long_scoreboard_per_warp_active\.avg"],
+  # SM % peak: include elapsed/active variants and smsp scope
+  "sm_pct_peak": [
+      r"sm__throughput\.avg\.pct_of_peak_sustained_elapsed",
+      r"sm__throughput\.avg\.pct_of_peak_sustained_active",
+      r"smsp__throughput\.avg\.pct_of_peak_sustained_active",
+  ],
+  # DRAM % peak: legacy gpu__dram_* and dram__throughput variants
+  "dram_pct_peak": [
+      r"gpu__dram_throughput\.avg\.pct_of_peak_sustained_elapsed",
+      r"dram__throughput\.avg\.pct_of_peak_sustained_elapsed",
+      r"dram__throughput\.avg\.pct_of_peak_sustained_active",
+  ],
+  # Tensor Core activity: legacy pipe cycles + newer HMMA pipe utilisation
+  "tensor_active_pct": [
+      r"sm__pipe_tensor_cycles_active\.avg\.pct_of_peak_sustained_active",
+      r"sm__inst_executed_pipe_tensor_op_hmma\.avg\.pct_of_peak_sustained_active",
+      r"smsp__inst_executed_pipe_tensor_op_hmma\.avg\.pct_of_peak_sustained_active",
+  ],
+  # FP32 efficiency/activity: legacy derived name + newer fp32 pipe utilisation
+  "fp32_eff_pct": [
+      r"flop_sp_efficiency",
+      r"sm__inst_executed_pipe_fp32\.avg\.pct_of_peak_sustained_active",
+      r"smsp__inst_executed_pipe_fp32\.avg\.pct_of_peak_sustained_active",
+  ],
+  # Cache hit rate: include sector and avg hit rate variants
+  "l1_hit_pct": [
+      r"l1tex__t_sector_hit_rate\.pct",
+      r"l1tex__avg_hit_rate\.pct",
+  ],
+  "l2_hit_pct": [
+      r"lts__t_sector_hit_rate\.pct",
+      r"lts__avg_hit_rate\.pct",
+  ],
+  # Warp stall (old and new metric names)
+  "stall_barrier": [
+      r"smsp__warp_issue_stalled_barrier_per_warp_active\.avg",
+      r"smsp__average_warps_issue_stalled_barrier_per_issue_active\.ratio",
+  ],
+  "stall_short_sb": [
+      r"smsp__warp_issue_stalled_short_scoreboard_per_warp_active\.avg",
+      r"smsp__average_warps_issue_stalled_short_scoreboard_per_issue_active\.ratio",
+  ],
+  "stall_long_sb": [
+      r"smsp__warp_issue_stalled_long_scoreboard_per_warp_active\.avg",
+      r"smsp__average_warps_issue_stalled_long_scoreboard_per_issue_active\.ratio",
+  ],
 }
 
 def ge(x, t):  # x >= t
@@ -61,12 +98,14 @@ def parse_nsys_kern_sum(path):
 def parse_ncu_csv_pair(raw_csv, id_csv):
     df_id = to_metric_unit_value(read_csv_safe(id_csv))
     df_raw = to_metric_unit_value(read_csv_safe(raw_csv))
+    df_raw_full = read_csv_safe(raw_csv)
     vals={}
     # Human-readable label fallbacks for newer Nsight versions
     LABEL_FALLBACKS = {
         "sm_pct_peak": [
             "SM % of Peak Sustained Elapsed",  # older
             "Compute (SM) Throughput",         # newer human-readable
+            "Compute Throughput",
         ],
         "dram_pct_peak": [
             "DRAM % of Peak Sustained Elapsed",  # older
@@ -75,10 +114,13 @@ def parse_ncu_csv_pair(raw_csv, id_csv):
         "tensor_active_pct": [
             "Tensor Pipe Active",
             "Tensor Core Active",
+            "Tensor Pipe Active (%)",
         ],
         "fp32_eff_pct": [
             "FP32 (SP) FLOP Efficiency",
             "FLOP_SP_EFFICIENCY",
+            "FP32 Pipe Active",
+            "FP32 Pipe Active (%)",
         ],
         "l1_hit_pct": [
             "L1/TEX Hit Rate",
@@ -88,28 +130,56 @@ def parse_ncu_csv_pair(raw_csv, id_csv):
             "L2 Hit Rate",
         ],
         "stall_barrier": [
+            r"Warp.*Stall.*Barrier.*Warp.*Active",
+            r"Barrier.*Warp.*Stall",
             "Warp Issue Stalled Barrier / Warp Active",
         ],
         "stall_short_sb": [
+            r"Warp.*Stall.*Short.*Scoreboard.*Warp.*Active",
+            r"Short.*Scoreboard.*Warp.*Stall",
             "Warp Issue Stalled Short Scoreboard / Warp Active",
         ],
         "stall_long_sb": [
+            r"Warp.*Stall.*Long.*Scoreboard.*Warp.*Active",
+            r"Long.*Scoreboard.*Warp.*Stall",
             "Warp Issue Stalled Long Scoreboard / Warp Active",
         ],
     }
     def find_by_labels(df, labels):
         if df is None or df.empty or not labels:
             return None
+        # Prefer literal matching to avoid regex pitfalls with special chars like parentheses
+        metrics = df['metric'].astype(str)
         for lb in labels:
-            sub = df[df['metric'].astype(str).str.contains(lb, regex=False)]
-            if not sub.empty:
-                v = pd.to_numeric(str(sub.iloc[0]['value']).replace('%',''), errors='coerce')
-                return v
+            try:
+                # 1) exact, case-insensitive match
+                sub = df[metrics.str.strip().str.casefold() == str(lb).strip().casefold()]
+                if not sub.empty:
+                    v = pd.to_numeric(str(sub.iloc[0]['value']).replace('%',''), errors='coerce')
+                    return v
+                # 2) substring contains, case-insensitive, non-regex
+                sub = df[metrics.str.contains(str(lb), regex=False, case=False)]
+                if not sub.empty:
+                    v = pd.to_numeric(str(sub.iloc[0]['value']).replace('%',''), errors='coerce')
+                    return v
+                # 3) as last resort, treat label as regex (for patterns like Warp.*Stall...)
+                sub = df[metrics.str.contains(str(lb), regex=True)]
+                if not sub.empty:
+                    v = pd.to_numeric(str(sub.iloc[0]['value']).replace('%',''), errors='coerce')
+                    return v
+            except Exception:
+                continue
         return None
     for k, cands in METRICS_CAND.items():
+        # First try metrics-id CSV
         v,u,m = pick_value(df_id, cands)
         if not (isinstance(v,float) and np.isnan(v)):
             vals[k]=v
+            continue
+        # Fall back to raw CSV where newer Nsight versions may expose renamed metrics
+        v_raw,u_raw,m_raw = pick_value(df_raw, cands)
+        if not (isinstance(v_raw,float) and np.isnan(v_raw)):
+            vals[k]=v_raw
             continue
         # Try label fallbacks: prefer id_csv (metrics-id), then raw
         labels = LABEL_FALLBACKS.get(k, [])
@@ -119,6 +189,41 @@ def parse_ncu_csv_pair(raw_csv, id_csv):
         if v2 is not None:
             vals[k] = v2
             continue
+        # As an additional fallback for newer Nsight raw page (wide columns), try matching column headers
+        if df_raw_full is not None and not df_raw_full.empty:
+            try:
+                import re
+                for cand in cands:
+                    # find first column whose name matches the candidate regex
+                    cols = [c for c in df_raw_full.columns if re.search(cand, str(c))]
+                    if cols:
+                        col = cols[0]
+                        ser = pd.to_numeric(df_raw_full[col], errors='coerce')
+                        ser = ser.dropna()
+                        if not ser.empty:
+                            vals[k] = float(ser.iloc[0])
+                            break
+                if k in vals:
+                    continue
+            except Exception:
+                pass
+        # Generic wide-CSV melting heuristics for common suffix patterns
+        if df_raw_full is not None and not df_raw_full.empty:
+            try:
+                # pick any column likely expressing peak percentage or hit rate
+                patt = r"(pct_of_peak_sustained_(elapsed|active)|_hit_rate\.pct)"
+                cols = [c for c in df_raw_full.columns if re.search(patt, str(c))]
+                # if still empty, keep going to next key
+                if cols:
+                    for c in cols:
+                        ser = pd.to_numeric(df_raw_full[c], errors='coerce').dropna()
+                        if not ser.empty:
+                            vals.setdefault(k, float(ser.iloc[0]))
+                            break
+                if k in vals:
+                    continue
+            except Exception:
+                pass
         # As last resort, try extracting rule-based values from metrics-id (e.g., CPIStall % under WarpStateStats)
         if k == 'stall_barrier':
             v3 = extract_rule_value(df_id, 'BarrierStall')
