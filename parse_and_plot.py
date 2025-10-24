@@ -3,6 +3,80 @@
 import sys, pathlib, re, logging, numpy as np, pandas as pd, matplotlib.pyplot as plt
 from utils import read_csv_safe, pick_value, to_metric_unit_value, extract_rule_value
 
+# Try to configure a font that supports Chinese labels to avoid glyph warnings.
+try:
+    import matplotlib
+    matplotlib.rcParams['axes.unicode_minus'] = False
+    # Try to register any local fonts shipped in repo (scripts/bash_metric/fonts/*.ttf|*.otf)
+    try:
+        from matplotlib import font_manager as _fm
+        _here = pathlib.Path(__file__).resolve().parent
+        _fonts_dir = _here / "fonts"
+        _registered = []
+        if _fonts_dir.exists():
+            for p in sorted(_fonts_dir.glob("*.ttf")) + sorted(_fonts_dir.glob("*.otf")):
+                try:
+                    _fm.fontManager.addfont(str(p))
+                    # Use the real family name if we can resolve it
+                    try:
+                        fam = _fm.FontProperties(fname=str(p)).get_name()
+                    except Exception:
+                        fam = None
+                    if fam:
+                        _registered.append(fam)
+                except Exception:
+                    pass
+        # If we successfully registered any family names, prefer them explicitly
+        if _registered:
+            # de-duplicate while preserving order
+            seen = set()
+            ordered = []
+            for f in _registered + [
+                'Noto Sans SC', 'Noto Sans CJK SC', 'Source Han Sans SC',
+                'WenQuanYi Micro Hei', 'SimHei', 'Microsoft YaHei', 'PingFang SC', 'DejaVu Sans']:
+                if f and f not in seen:
+                    seen.add(f); ordered.append(f)
+            # Prefer the first registered family directly as default, but
+            # if LXGW WenKai is present, use it for better CJK coverage.
+            preferred = None
+            for candidate in (['LXGW WenKai'] + ordered):
+                if candidate in ordered:
+                    preferred = candidate
+                    break
+            matplotlib.rcParams['font.family'] = [preferred or ordered[0]]
+            matplotlib.rcParams['font.sans-serif'] = ordered
+            _HAS_LOCAL_CJK = True
+        else:
+            _HAS_LOCAL_CJK = False
+    except Exception:
+        pass
+    # Prefer using mplfonts if available (it downloads and registers CJK fonts)
+    try:
+        if not globals().get('_HAS_LOCAL_CJK', False):
+            import mplfonts
+            # Try to activate a bundled CJK font if available
+            try:
+                mplfonts.use_font('Noto Sans CJK SC')
+            except Exception:
+                try:
+                    mplfonts.use_font('Source Han Sans SC')
+                except Exception:
+                    pass
+    except Exception:
+        # Fallback to a list of common CJK-capable families if present
+        for fam in [
+            'Noto Sans SC', 'Noto Sans CJK SC', 'Source Han Sans SC', 'WenQuanYi Micro Hei',
+            'SimHei', 'Microsoft YaHei', 'PingFang SC', 'DejaVu Sans'
+        ]:
+            try:
+                matplotlib.rcParams['font.family'] = ['sans-serif']
+                matplotlib.rcParams['font.sans-serif'] = [fam]
+                break
+            except Exception:
+                continue
+except Exception:
+    pass
+
 # === Heuristic thresholds ===
 HEURISTIC = dict(
     SM_PEAK_HI = 60.0,
@@ -357,17 +431,17 @@ def main(out_root, base_log: str|None = None):
 
     for _, r in df.iterrows():
         idv, kernel = r['id'], r['kernel']
-        add_row(idv,kernel,"算力单元利用率","SM 利用率(峰值%)","sm__throughput.avg.pct_of_peak_sustained_elapsed", r['sm_pct_peak'],"%", "ncu metrics")
-        add_row(idv,kernel,"算力单元利用率","Tensor Core 活跃(%)","sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_active", r['tensor_active_pct'],"%", "ncu metrics")
-        add_row(idv,kernel,"算力单元利用率","FP32 效率(%)","flop_sp_efficiency", r['fp32_eff_pct'],"%", "ncu metrics")
-        add_row(idv,kernel,"Cache 命中率","L1/TEX Sector 命中率(%)","l1tex__t_sector_hit_rate.pct", r['l1_hit_pct'],"%", "ncu metrics")
-        add_row(idv,kernel,"Cache 命中率","L2 Sector 命中率(%)","lts__t_sector_hit_rate.pct", r['l2_hit_pct'],"%", "ncu metrics")
-        add_row(idv,kernel,"内存带宽","DRAM 吞吐(峰值%)","gpu__dram_throughput.avg.pct_of_peak_sustained_elapsed", r['dram_pct_peak'],"%", "ncu metrics")
-        add_row(idv,kernel,"Warp 效率","Barrier Stall / Warp Active","smsp__warp_issue_stalled_barrier_per_warp_active.avg", r['stall_barrier'],"", "ncu metrics")
-        add_row(idv,kernel,"Warp 效率","Short Scoreboard Stall / Warp Active","smsp__warp_issue_stalled_short_scoreboard_per_warp_active.avg", r['stall_short_sb'],"", "ncu metrics")
-        add_row(idv,kernel,"Warp 效率","Long Scoreboard Stall / Warp Active","smsp__warp_issue_stalled_long_scoreboard_per_warp_active.avg", r['stall_long_sb'],"", "ncu metrics")
-        add_row(idv,kernel,"Kernel 耗时","时间占比(%)","Time(%)", r['kernel_time_pct'],"%", "nsys stats: cuda_gpu_kern_sum")
-        add_row(idv,kernel,"Kernel 耗时","总耗时(ns)","Total Time (ns)", r['kernel_total_time_ns'],"ns", "nsys stats: cuda_gpu_kern_sum")
+        add_row(idv,kernel,"算力单元利用率","SM 利用率(峰值%) / Compute Throughput","sm__throughput.avg.pct_of_peak_sustained_elapsed", r['sm_pct_peak'],"%", "ncu metrics")
+        add_row(idv,kernel,"算力单元利用率","Tensor Core 活跃(%) / Tensor Pipe Active","sm__pipe_tensor_cycles_active.avg.pct_of_peak_sustained_active", r['tensor_active_pct'],"%", "ncu metrics")
+        add_row(idv,kernel,"算力单元利用率","FP32 效率(%) / FP32 FLOP Efficiency","flop_sp_efficiency", r['fp32_eff_pct'],"%", "ncu metrics")
+        add_row(idv,kernel,"Cache 命中率","L1/TEX Sector 命中率(%) / L1/TEX Hit Rate","l1tex__t_sector_hit_rate.pct", r['l1_hit_pct'],"%", "ncu metrics")
+        add_row(idv,kernel,"Cache 命中率","L2 Sector 命中率(%) / L2 Hit Rate","lts__t_sector_hit_rate.pct", r['l2_hit_pct'],"%", "ncu metrics")
+        add_row(idv,kernel,"内存带宽","DRAM 吞吐(峰值%) / DRAM Throughput","gpu__dram_throughput.avg.pct_of_peak_sustained_elapsed", r['dram_pct_peak'],"%", "ncu metrics")
+        add_row(idv,kernel,"Warp 效率","Barrier Stall / Warp Active / 栅栏停顿(每活跃Warp)","smsp__warp_issue_stalled_barrier_per_warp_active.avg", r['stall_barrier'],"", "ncu metrics")
+        add_row(idv,kernel,"Warp 效率","Short Scoreboard Stall / Warp Active / 短记分牌停顿(每活跃Warp)","smsp__warp_issue_stalled_short_scoreboard_per_warp_active.avg", r['stall_short_sb'],"", "ncu metrics")
+        add_row(idv,kernel,"Warp 效率","Long Scoreboard Stall / Warp Active / 长记分牌停顿(每活跃Warp)","smsp__warp_issue_stalled_long_scoreboard_per_warp_active.avg", r['stall_long_sb'],"", "ncu metrics")
+        add_row(idv,kernel,"Kernel 耗时","时间占比(%) / Time(%)","Time(%)", r['kernel_time_pct'],"%", "nsys stats: cuda_gpu_kern_sum")
+        add_row(idv,kernel,"Kernel 耗时","总耗时(ns) / Total Time (ns)","Total Time (ns)", r['kernel_total_time_ns'],"ns", "nsys stats: cuda_gpu_kern_sum")
         add_row(idv,kernel,"整体推理瓶颈","启发式(基于SM/DRAM/Cache)","bottleneck", r['bottleneck'],"", "heuristic")
     long_df = pd.DataFrame(long_rows)
 
@@ -392,24 +466,48 @@ def main(out_root, base_log: str|None = None):
     figs_dir.mkdir(exist_ok=True, parents=True)
 
     # Top10 kernel by Time(%)
+    def _auto_figsize_and_margins(labels, orient='y'):
+        labels = [str(x) for x in (labels or [])]
+        max_len = max((len(s) for s in labels), default=0)
+        n = len(labels)
+        if orient == 'y':
+            width = max(12, min(30, 0.12 * max_len + 8))
+            height = max(4, min(20, 0.5 * n + 2))
+            margins = dict(left=min(0.6, max(0.18, 0.009 * max_len)), right=0.98, top=0.90, bottom=0.12)
+        else:
+            width = max(14, min(30, 0.12 * max_len + 8))
+            height = max(5, min(22, 0.55 * n + 3))
+            margins = dict(left=0.12, right=0.98, top=0.90, bottom=min(0.6, max(0.18, 0.010 * max_len)))
+        return width, height, margins
     for idv, g in df.groupby("id"):
         g2 = g.sort_values("kernel_time_pct", ascending=False).head(10)
         if not g2.empty:
-            plt.figure()
-            plt.title(f"{idv} Top10 Kernel Time(%)")
-            plt.barh(g2["kernel"], g2["kernel_time_pct"])
-            plt.gca().invert_yaxis()
-            plt.xlabel("Time (%)")
-            plt.tight_layout()
+            labels = list(g2["kernel"].astype(str))
+            fw, fh, mg = _auto_figsize_and_margins(labels, orient='y')
+            fig, ax = plt.subplots(figsize=(fw, fh))
+            ax.set_title(f"{idv} Top10 Kernel Time(%) / 按耗时Top10")
+            ax.barh(labels, g2["kernel_time_pct"], color="#4C78A8")
+            ax.invert_yaxis()
+            ax.set_xlabel("Time (%) / 时间占比(%)")
+            ax.tick_params(axis='y', labelsize=8)
+            fig.subplots_adjust(**mg)
             plt.savefig(figs_dir / f"{idv}_topk_time.png")
             plt.close()
 
-            plt.figure()
-            plt.title(f"{idv} SM/DRAM % of Peak (Top10 by Time)")
+            labels = list(g2["kernel"].astype(str))
+            fw, fh, mg = _auto_figsize_and_margins(labels, orient='x')
+            fig, ax = plt.subplots(figsize=(fw, fh))
+            ax.set_title(f"{idv} SM/DRAM % of Peak (Top10 by Time) / SM/DRAM 峰值占比（按耗时Top10）")
             a = g2[["kernel","sm_pct_peak","dram_pct_peak"]].set_index("kernel")
-            a.plot(kind="bar")
-            plt.ylabel("%")
-            plt.tight_layout()
+            # 设置更友好的图例（中英对照）
+            a.columns = [
+                "SM 利用率(峰值%) / Compute Throughput",
+                "DRAM 吞吐(峰值%) / DRAM Throughput",
+            ]
+            a.plot(kind="bar", ax=ax, color=["#72B7B2", "#E45756"])
+            ax.set_ylabel("%")
+            ax.tick_params(axis='x', labelrotation=35, labelsize=8)
+            fig.subplots_adjust(**mg)
             plt.savefig(figs_dir / f"{idv}_sm_dram_peak.png")
             plt.close()
 

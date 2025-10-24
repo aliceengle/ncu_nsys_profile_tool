@@ -4,10 +4,16 @@ import os, sys, csv, shlex, subprocess, pathlib, re, shutil, pandas as pd, numpy
 import logging
 
 ROOT = pathlib.Path(__file__).resolve().parent
-OUT  = ROOT / "out"
-OUT.mkdir(parents=True, exist_ok=True)
+# Output root can be customized via env:
+# - OUT_DIR: base output directory (default: ROOT/out)
+# - CLEAN_OUT: if "1", remove existing OUT before creating
+# - CLEAN_PER_ID: if "1", remove per-id subdir before running
+_OUT_DIR_ENV = os.environ.get("OUT_DIR", "").strip()
+OUT_BASE = pathlib.Path(_OUT_DIR_ENV) if _OUT_DIR_ENV else (ROOT / "out")
+# OUT will be decided dynamically from targets.tsv ids within main()
+OUT = None  # type: ignore
 
-DEF_TOPN = int(os.environ.get("TOPN", "5"))
+DEF_TOPN = int(os.environ.get("TOPN", "14"))
 # Ensure metrics default is a single comma-separated string
 NCU_METRICS = os.environ.get(
     "NCU_METRICS",
@@ -194,25 +200,55 @@ def read_targets(tsv):
     return rows
 
 def pick_topk_kernels(csv_path, topn):
-    df = pd.read_csv(csv_path)
+    """Return top-N kernel names from nsys cuda_gpu_kern_sum CSV.
+    Gracefully handle empty/missing files by returning [].
+    """
+    try:
+        df = pd.read_csv(csv_path)
+    except FileNotFoundError:
+        logging.warning("[NSYS] kernel summary CSV not found: %s", csv_path)
+        return []
+    except pd.errors.EmptyDataError:
+        logging.warning("[NSYS] kernel summary CSV is empty: %s", csv_path)
+        return []
+    if df is None or df.empty:
+        logging.warning("[NSYS] kernel summary CSV has no rows: %s", csv_path)
+        return []
     cols = df.columns.str.lower()
-    name = df.columns[np.where(cols.str.contains('name'))[0][0]]
+    name_idx = np.where(cols.str.contains('name'))[0]
+    if not len(name_idx):
+        logging.warning("[NSYS] kernel summary CSV has no 'name' column: %s (cols=%s)", csv_path, list(df.columns))
+        return []
+    name = df.columns[name_idx[0]]
     m = np.where(cols.str.contains('time.*%'))[0]
-    if len(m): key = df.columns[m[0]]
+    if len(m):
+        key = df.columns[m[0]]
     else:
         m2 = np.where(cols.str.contains('total.*time.*ns'))[0]
         key = df.columns[m2[0]] if len(m2) else name
-    s = df.sort_values(key, ascending=False)[name].head(topn)
+    try:
+        s = df.sort_values(key, ascending=False)[name].head(topn)
+    except Exception as e:
+        logging.warning("[NSYS] failed to pick top kernels from %s: %s", csv_path, e)
+        return []
+    names = [str(x) for x in s if str(x).strip()]
     out = pathlib.Path(csv_path).with_suffix('.topk.txt')
-    out.write_text('\n'.join(map(str,s)))
-    logging.info("[TOPK] Picked top-%d kernels from %s -> %s", topn, csv_path, list(map(str, s)))
-    return [str(x) for x in s]
+    try:
+        out.write_text('\n'.join(names))
+    except Exception:
+        pass
+    logging.info("[TOPK] Picked top-%d kernels from %s -> %s", len(names), csv_path, names)
+    return names
 
 def safe_regex_contains(s):
     return "regex:.*" + re.escape(s) + ".*"
 
 def do_one(id, cmd, workdir, envs, topn):
-    outdir = OUT / id
+    global OUT
+    outdir = OUT / id  # type: ignore
+    # Optionally clean per-id directory to avoid mixing with previous runs
+    if os.environ.get("CLEAN_PER_ID", "0") == "1" and outdir.exists():
+        shutil.rmtree(outdir, ignore_errors=True)
     (outdir/"nsys").mkdir(parents=True, exist_ok=True)
     (outdir/"ncu").mkdir(parents=True, exist_ok=True)
 
@@ -288,9 +324,17 @@ def do_one(id, cmd, workdir, envs, topn):
         f'--force-export=true --force-overwrite=true '
         f'--output "{outdir}/nsys/{id}" "{outdir}/nsys/{id}.nsys-rep"'
     )
+    # Quick sanity: CSV present and non-empty?
+    kern_csv = f"{outdir}/nsys/{id}_cuda_gpu_kern_sum.csv"
+    if not os.path.exists(kern_csv) or os.path.getsize(kern_csv) == 0:
+        logging.warning("[NSYS] kernel summary CSV missing or empty: %s (skip NCU for id=%s)", kern_csv, id)
+        return
 
     # TopN kernels
-    topk = pick_topk_kernels(f"{outdir}/nsys/{id}_cuda_gpu_kern_sum.csv", topn)
+    topk = pick_topk_kernels(kern_csv, topn)
+    if not topk:
+        logging.warning("[NSYS] no kernels found in CSV; skip NCU for id=%s", id)
+        return
     
     # ncu for each kernel
     for kname in topk:
@@ -321,19 +365,14 @@ def do_one(id, cmd, workdir, envs, topn):
 
 def main():
     import argparse
-    # 设置同时输出到终端与文件的日志
-    log_path = OUT / "run_profiling.log"
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
     # 清理旧 handler，避免重复
     logger.handlers = []
     sh = logging.StreamHandler(stream=sys.stdout)
-    fh = logging.FileHandler(str(log_path), mode='w', encoding='utf-8')
     fmt = logging.Formatter('%(asctime)s %(levelname)s - %(message)s')
     sh.setFormatter(fmt)
-    fh.setFormatter(fmt)
     logger.addHandler(sh)
-    logger.addHandler(fh)
     ap = argparse.ArgumentParser()
     ap.add_argument("--targets", default=str(ROOT/"targets.tsv"))
     ap.add_argument("--topn", type=int, default=DEF_TOPN)
@@ -341,6 +380,30 @@ def main():
 
     logging.info("[START] run_profiling targets=%s topn=%d", args.targets, args.topn)
     rows = read_targets(args.targets)
+    # 构造分组名：按顺序收集所有 id，去重后用加号拼接，并做路径安全化
+    seen = set()
+    ordered_ids = []
+    for r in rows:
+        nid = r['id']
+        if nid not in seen:
+            seen.add(nid)
+            ordered_ids.append(nid)
+    import re as _re
+    def _safe_seg(s: str) -> str:
+        return _re.sub(r'[^A-Za-z0-9._-]+', '_', s)[:80] or 'task'
+    group_name = '+'.join(_safe_seg(x) for x in ordered_ids) if ordered_ids else 'task'
+    # 初始化 OUT 路径并根据 CLEAN_OUT 进行清理
+    global OUT
+    OUT = OUT_BASE / group_name
+    if os.environ.get("CLEAN_OUT", "0") == "1" and OUT.exists():
+        shutil.rmtree(OUT, ignore_errors=True)
+    OUT.mkdir(parents=True, exist_ok=True)
+    # 文件日志写入新 OUT 下
+    log_path = OUT / "run_profiling.log"
+    fh = logging.FileHandler(str(log_path), mode='w', encoding='utf-8')
+    fh.setFormatter(fmt)
+    logger.addHandler(fh)
+    logging.info("[OUT] base=%s group=%s full=%s", OUT_BASE, group_name, OUT)
     for r in rows:
         logging.info("[DO] id=%s", r['id'])
         try:
