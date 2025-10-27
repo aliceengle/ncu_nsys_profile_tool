@@ -243,7 +243,7 @@ def pick_topk_kernels(csv_path, topn):
 def safe_regex_contains(s):
     return "regex:.*" + re.escape(s) + ".*"
 
-def do_one(id, cmd, workdir, envs, topn):
+def do_one(id, cmd, workdir, envs, topn, use_nvtx=False):
     global OUT
     outdir = OUT / id  # type: ignore
     # Optionally clean per-id directory to avoid mixing with previous runs
@@ -306,9 +306,14 @@ def do_one(id, cmd, workdir, envs, topn):
 
     # nsys profile
     nvtxcap = f'--nvtx-capture={NVTX_NAME}{("@" + NVTX_DOMAIN) if NVTX_DOMAIN else ""}' if (CAPTURE_RANGE=="nvtx" and NVTX_NAME) else ""
-    logging.info("[NSYS] id=%s outdir=%s workdir=%s", id, outdir, workdir or os.getcwd())
+    # Build trace list; include nvtx if requested
+    trace_items = ["cuda", "osrt"]
+    if use_nvtx:
+        trace_items.append("nvtx")
+    trace_arg = ",".join(trace_items)
+    logging.info("[NSYS] id=%s outdir=%s workdir=%s nvtx=%s", id, outdir, workdir or os.getcwd(), use_nvtx)
     run(
-        f'nsys profile --force-overwrite=true --trace=cuda,osrt,nvtx '
+        f'nsys profile --force-overwrite=true --trace={trace_arg} '
         f'--capture-range={CAPTURE_RANGE} '
         f'{"--capture-range-end=stop" if CAPTURE_RANGE!="none" else ""} '
         f'{nvtxcap} '
@@ -353,7 +358,8 @@ def do_one(id, cmd, workdir, envs, topn):
         run(
             f'ncu -f -o "{base}" --kernel-name-base demangled --kernel-name "{pattern}" '
             f'{cap_opts}--cache-control all --clock-control base '
-            f'--profile-from-start yes --target-processes all {cmd}',
+            f'--profile-from-start yes --target-processes all '
+            f'{"--nvtx " if use_nvtx else ""}{cmd}',
             cwd=(workdir if workdir and workdir!="-" else None),
             env=env
         )
@@ -376,6 +382,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--targets", default=str(ROOT/"targets.tsv"))
     ap.add_argument("--topn", type=int, default=DEF_TOPN)
+    ap.add_argument("--nvtx", action="store_true", help="Enable NVTX collection for nsys (--trace includes nvtx) and ncu (--nvtx)")
     args = ap.parse_args()
 
     logging.info("[START] run_profiling targets=%s topn=%d", args.targets, args.topn)
@@ -407,7 +414,7 @@ def main():
     for r in rows:
         logging.info("[DO] id=%s", r['id'])
         try:
-            do_one(r['id'], r['cmd'], r.get('workdir') or None, r.get('env') or None, args.topn)
+            do_one(r['id'], r['cmd'], r.get('workdir') or None, r.get('env') or None, args.topn, use_nvtx=args.nvtx)
         except SystemExit as e:
             logging.error("[FAIL] id=%s error=%s", r['id'], e)
             continue
