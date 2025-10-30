@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-import sys, pathlib, re, logging, numpy as np, pandas as pd, matplotlib.pyplot as plt
-from utils import read_csv_safe, pick_value, to_metric_unit_value, extract_rule_value
+import sys, argparse, pathlib, re, logging, numpy as np, pandas as pd, matplotlib.pyplot as plt
+from .utils import read_csv_safe, pick_value, to_metric_unit_value, extract_rule_value
 
 # Try to configure a font that supports Chinese labels to avoid glyph warnings.
 try:
@@ -520,15 +520,20 @@ def main(out_root, base_log: str|None = None):
     print(f"Wrote: {csv_path}")
     print(f"Wrote: {md_path}")
     print(f"Figures: {figs_dir}")
+
+
+def cli() -> None:
+    parser = argparse.ArgumentParser(description="解析 Nsight CSV 并生成图表汇总。")
+    parser.add_argument("out_root", nargs="?", default="./out", help="包含捕获输出的目录（默认 ./out）")
+    parser.add_argument(
+        "--log",
+        dest="base_log",
+        default=None,
+        help="可选的日志文件路径；若提供则在解析结果中追加记录",
+    )
+    ns = parser.parse_args()
+    main(ns.out_root, ns.base_log)
+
+
 if __name__=="__main__":
-    # CLI: parse_and_plot.py <out_root> [--log <path>]
-    out_root = None
-    base_log = None
-    args = sys.argv[1:]
-    if not args:
-        out_root = "./out"
-    else:
-        out_root = args[0]
-        if len(args) > 2 and args[1] == "--log":
-            base_log = args[2]
-    main(out_root, base_log)
+    cli()

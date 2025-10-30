@@ -1,5 +1,0 @@
-# NAME	CMD	WORKDIR	ENVS
-# 示例：以 TAB 分隔；可留空 WORKDIR/ENVS（用空字段或 '-'）
-# yolo_infer	python ../yolo_infer.py --nvtx	.	-
-# gemm_infer	../../SGEMM_CUDA/build/sgemm_all	.	-
-siglip_transform	python ../sigclip_infer/infer.py   --model_path ../../results/model_save/pytorch_model/animal_clip.pt   --image_path ../../results/test_data/柴犬2.jpg --device 1 --use-torch --nvtx	.	-

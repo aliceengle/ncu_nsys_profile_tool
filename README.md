@@ -11,27 +11,22 @@
 - **整体推理瓶颈**（基于 SM/DRAM/Cache 的启发式：Compute / Memory / Mixed / Memory/Latency）
 
 ## 目录结构与作用
-- `profile_and_report.sh`：核心 Bash 流水线脚本，读取 `targets.tsv` 批量执行：
-  - nsys 采集（生成 `.nsys-rep`）；
-  - nsys stats 导出（生成 `*_cuda_gpu_kern_sum.csv` 等）；
-  - 自动选取 Top-N kernel 并生成正则；
-  - ncu 采集（生成 `.ncu-rep` 与 raw CSV）。
-- `methods/nsys_ncu/`：方法目录（精简版 Bash + Python 助手）
-  - `methods/nsys_ncu/profile_and_report.sh`：仅聚焦调用 nsys/ncu；复杂逻辑（TopN 正则、CSV 安检、进度打印）均保留；默认读取 `../targets.tsv`，输出到 `../out`。
-  - `methods/nsys_ncu/gen_topk_regex.py`：从 nsys 的 `cuda_gpu_kern_sum.csv` 选 Top-N kernel 并生成安全正则。
-- `run_profiling.py`：等价的 Python 实现，便于跨平台与小改造。
-- `parse_and_plot.py`：将 ncu 与 nsys 的 CSV 聚合成汇总表并绘图。
-- `targets.tsv`：任务定义表（TSV），一行一个目标。
-- `out/`：默认输出根目录（nsys/ncu/汇总，含全局运行日志 `profile_and_report.log`）。
-- 其它：`requirements.txt`、`utils.py` 辅助脚本。
+- `bash_metric/`：Python 包源码
+  - `run_profiling.py`：端到端采集（nsys + ncu）主流程，提供 `bash-metric-run` CLI。
+  - `parse_and_plot.py`：解析 ncu/nsys CSV 并绘制图表，提供 `bash-metric-parse` CLI。
+  - `methods/nsys_ncu_all/`：全流程捕获与 Top-N 解析脚本（Python + Bash），提供 `bash-metric-capture-all` 与 `bash-metric-analyze-topk` CLI。
+  - `targets.tsv`：默认目标列表示例，安装后可作为模板复制修改。
+  - `fonts/`：内置常用中文字体（若系统缺字形时自动注册）。
+- `requirements.txt`：与 pixi 默认环境一致的依赖清单，可供手工安装参考。
+- `out/`：示例输出目录（包安装后不会自动创建，可通过环境变量自定义）。
+- `.github/workflows/publish-pypi.yml`：GitHub Actions 工作流，根据打出的版本标签自动构建并发布到 PyPI（需要在仓库 Secrets 中配置 `PYPI_API_TOKEN`）。
 
 ## 依赖
-环境依赖：
-- 安装并确保 PATH 中可找到 `nsys` 与 `ncu`。
-- `python3` 与 `pip`；安装本目录所需 Python 依赖：
-  ```bash
-  pip install -r requirements.txt
-  ```
+建议使用 `pixi` 默认环境（`python 3.10` + Nsight CLI）。如单独安装，可执行：
+```bash
+pip install bash-metric
+```
+运行时仍需确保系统已安装 `nsys` 与 `ncu` 并可在 PATH 中找到。
 
 ## 目标列表
 编辑 `targets.tsv`（TSV 四列，使用 TAB 分隔）：
@@ -47,29 +42,34 @@ resnet_train	python train.py --epochs 1	./cv	CUDA_VISIBLE_DEVICES=0
 > `WORKDIR` 或 `ENVS` 可留空（用 `-` 表示）。`ENVS` 多个变量用逗号分隔，如 `A=1,B=2`；留空或 `-` 不会传给 `env`，避免破坏 PATH。
 
 ## 运行
-**Linux/macOS（bash）**
-在 `scripts/bash_metric` 目录下执行方法脚本：
+**推荐：安装后直接使用 CLI**
 ```bash
-bash methods/nsys_ncu/profile_and_report.sh
+bash-metric-run --targets /path/to/targets.tsv --topn 10
 ```
-或使用顶层包装器（内部调用方法脚本）：
+完成采集后，可单独解析历史结果：
 ```bash
-bash profile_and_report.sh
+bash-metric-parse /path/to/out_group --log /path/to/out_group/run.log
+```
+若只想执行捕获阶段或后处理阶段，可分别调用：
+```bash
+bash-metric-capture-all --targets xxx.tsv
+bash-metric-analyze-topk --targets xxx.tsv
 ```
 
-**跨平台（Python）**
+**源码运行（任选）**
 ```bash
-python run_profiling.py
+python -m bash_metric.run_profiling
+python -m bash_metric.parse_and_plot ./out --log ./out/run.log
 ```
 
-运行后在 `out/` 会看到：
+运行后默认在 `out/` 会看到：
 - `nsys/<id>.nsys-rep` 与 `<id>_cuda_gpu_kern_sum.csv`（Kernel 耗时/占比）；
 - `ncu/<kernel>/*.ncu-rep` 与 `*_ncu_raw.csv`、`*_metrics_id.csv`；
 - `profile_and_report.log`：单一全局日志，记录所有目标的全部阶段输出，重复执行会覆盖重写；
 - `summary_*.csv/.md` 与 `figs/*.png`。
 
 ## 运行阶段与进度打印
-`profile_and_report.sh` 内部将每个目标的执行划分为 6 个阶段，并打印进度：
+`bash-metric-run` 会将每个目标的执行划分为 6 个阶段，并打印进度：
 1) 准备目录与上下文
 2) nsys 采集
 3) nsys 导出 CSV
@@ -105,5 +105,12 @@ python run_profiling.py
 ## 参考（命令出处）
 - Nsight Systems 用户指南（`--capture-range`/NVTX 捕获、`TMPDIR`、`stats` 报表/CSV、`--force-export` 与 `--force-overwrite` 等）。
 - Nsight Compute CLI 文档（`--page raw --csv`、`--import`、`--metrics`、`--kernel-name-base/--kernel-name`、`--target-processes all`、`--cache-control`、`--clock-control`、回放与匹配等）。
+
+## 发布到 PyPI（自动化流水线）
+1. 在仓库 Settings → Secrets and variables → Actions 中新增 `PYPI_API_TOKEN`，值为 PyPI 生成的 API Token，用户名固定为 `__token__`。  
+2. 更新 `scripts/bash_metric/pyproject.toml` 的 `version`，提交并推送。  
+3. 打标签（支持 `v1.2.3` 或 `bash-metric-v1.2.3` 等格式）并推送：`git tag v1.2.3 && git push origin v1.2.3`。  
+4. GitHub Actions 工作流 `.github/workflows/publish-pypi.yml` 会自动构建并上传 sdist/wheel 到 PyPI。  
+5. 在 Actions 详情页确认 `Publish to PyPI` job 成功，稍候 1～2 分钟即可在 PyPI 下载对应版本。
 
 > 本子仓库即用于批量采集与汇总 GPU 指标，适合在 `ncu_dir` 环境中，对 YOLO 或其它脚本进行快速端到端画像。

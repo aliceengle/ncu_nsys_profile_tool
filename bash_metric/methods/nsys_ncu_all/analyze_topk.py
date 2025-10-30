@@ -17,7 +17,7 @@ THIS_DIR = pathlib.Path(__file__).resolve().parent
 if str(THIS_DIR) not in sys.path:
     sys.path.insert(0, str(THIS_DIR))
 
-import common  # noqa: E402
+from . import common  # noqa: E402
 
 
 def _setup_logger(log_path: pathlib.Path) -> logging.Logger:

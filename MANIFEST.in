@@ -1,0 +1,4 @@
+include README.md LICENSE requirements.txt
+recursive-include bash_metric/fonts *.ttf
+recursive-include bash_metric/methods *.py *.sh *.md
+include bash_metric/targets.tsv
