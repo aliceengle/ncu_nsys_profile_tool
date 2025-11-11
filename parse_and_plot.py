@@ -1,7 +1,10 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 import sys, pathlib, re, logging, numpy as np, pandas as pd, matplotlib.pyplot as plt
-from utils import read_csv_safe, pick_value, to_metric_unit_value, extract_rule_value
+from utils import (
+    read_csv_safe, pick_value, to_metric_unit_value, extract_rule_value,
+    kernel_basename_candidates
+)
 
 # Try to configure a font that supports Chinese labels to avoid glyph warnings.
 try:
@@ -360,19 +363,16 @@ def main(out_root, base_log: str|None = None):
             logger.warning("nsys kernel summary CSV not found under %s", id_dir/"nsys")
         kern_df = parse_nsys_kern_sum(nsys_csv) if nsys_csv else pd.DataFrame()
         # Build a mapping from sanitized kernel name (as used in NCU filenames) to timing fields
-        def _sanitize_base(s: str) -> str:
-            return re.sub(r'[^A-Za-z0-9._-]+', '_', str(s))[:120]
         ktime_map = {}
         if not kern_df.empty:
             for _, row in kern_df.iterrows():
                 k = str(row.get('kernel',''))
                 if not k:
                     continue
-                ktime_map[_sanitize_base(k)] = (
-                    k,
-                    float(row.get('kernel_time_pct')) if 'kernel_time_pct' in kern_df.columns else float('nan'),
-                    float(row.get('kernel_total_time_ns')) if 'kernel_total_time_ns' in kern_df.columns else float('nan'),
-                )
+                time_pct = float(row.get('kernel_time_pct')) if 'kernel_time_pct' in kern_df.columns else float('nan')
+                total_ns = float(row.get('kernel_total_time_ns')) if 'kernel_total_time_ns' in kern_df.columns else float('nan')
+                for key in kernel_basename_candidates(k):
+                    ktime_map.setdefault(key, (k, time_pct, total_ns))
         # 兼容两种导出命名：*_ncu_raw.csv（Python 路线）与 *_raw.csv（Bash 方法脚本）
         raw_list = list((id_dir/"ncu").glob("*_ncu_raw.csv")) + list((id_dir/"ncu").glob("*_raw.csv"))
         seen = set()

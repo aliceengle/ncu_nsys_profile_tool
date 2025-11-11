@@ -1,4 +1,6 @@
-import pandas as pd, numpy as np, re
+import pandas as pd, numpy as np, re, hashlib
+
+_SANITIZE_RE = re.compile(r'[^A-Za-z0-9._-]+')
 
 def read_csv_safe(p):
     try:
@@ -8,6 +10,41 @@ def read_csv_safe(p):
 
 def _norm(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", str(s).lower())
+
+def _sanitize_kernel(name: str) -> str:
+    return _SANITIZE_RE.sub('_', str(name))
+
+def kernel_basename_legacy(name: str, limit: int = 120) -> str:
+    """
+    Legacy sanitizer: replace非允许字符为下划线并裁剪长度。
+    """
+    sanitized = _sanitize_kernel(name)
+    trimmed = sanitized[:limit]
+    return trimmed if trimmed else "kernel"
+
+def kernel_basename_stable(name: str, limit: int = 120) -> str:
+    """
+    生成稳定且唯一的 kernel 文件前缀：
+    - 使用 legacy 逻辑获取主体
+    - 追加 8 位 SHA1 hash，避免不同 kernel 名写入同一文件
+    """
+    digest = hashlib.sha1(str(name).encode('utf-8')).hexdigest()[:8]
+    base_limit = max(8, limit - len(digest) - 1)
+    body = kernel_basename_legacy(name, base_limit).rstrip('_')
+    if not body:
+        body = "kernel"
+    return f"{body}_{digest}"
+
+def kernel_basename_candidates(name: str, limit: int = 120) -> list[str]:
+    """
+    返回可用于匹配文件的所有候选前缀。优先新 hash 方案，
+    同时带上 legacy 版本以兼容旧数据。
+    """
+    stable = kernel_basename_stable(name, limit)
+    legacy = kernel_basename_legacy(name, limit)
+    if stable == legacy:
+        return [stable]
+    return [stable, legacy]
 
 def to_metric_unit_value(df: pd.DataFrame) -> pd.DataFrame:
     """

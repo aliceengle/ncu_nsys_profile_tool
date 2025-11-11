@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 import os, sys, csv, shlex, subprocess, pathlib, re, shutil, pandas as pd, numpy as np
 import logging
+from utils import kernel_basename_stable
 
 ROOT = pathlib.Path(__file__).resolve().parent
 # Output root can be customized via env:
@@ -342,10 +343,11 @@ def do_one(id, cmd, workdir, envs, topn, use_nvtx=False):
         return
     
     # ncu for each kernel
-    for kname in topk:
+    for kname in topk[:]:
         if not kname: continue
         pattern = safe_regex_contains(kname)
-        base = outdir / "ncu" / re.sub(r'[^A-Za-z0-9._-]+', '_', kname)[:120]
+        base_name = kernel_basename_stable(kname)
+        base = outdir / "ncu" / base_name
         logging.info("[NCU] id=%s kernel=%s pattern=%s base=%s", id, kname, pattern, base)
         # Compose capture options: preset set + optional sections for stalls+cache hit rates
         cap_opts = ''
